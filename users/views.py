@@ -6,6 +6,7 @@ from django.conf import settings
 
 from users.models import User
 from users.serializers import UserSerializer
+from users.utils import cache_performance
 
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
@@ -37,10 +38,12 @@ class UserViewSet(viewsets.ModelViewSet):
         super().perform_create(serializer)
 
     def perform_update(self, serializer):
-        # A user changed, so the list might look different.
-        cache.delete('user_list')
-        print("Cache 'user_list' CLEARED! 🗑️")
         super().perform_update(serializer)
+        
+        fresh_data = self.get_serializer(self.get_queryset(), many=True).data
+        cache.set('user_list', fresh_data, timeout=settings.CACHE_TTL)
+        
+        print("Cache 'user_list' UPDATED (Write-Through) 📝")
 
     def perform_destroy(self, instance):
         # A user was deleted.
