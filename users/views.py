@@ -21,10 +21,10 @@ class UserViewSet(viewsets.ModelViewSet):
         cached_data = cache.get(cache_key)
         
         if cached_data is not None:
-            print("Fetching from Cache ⚡")
+            print("Fetching from Cache ")
             return Response(cached_data)
         
-        print("Fetching from Database 🐢")
+        print("Fetching from Database ")
         response = super().list(request, *args, **kwargs)
         
         cache.set(cache_key, response.data, timeout=settings.CACHE_TTL)
@@ -32,21 +32,43 @@ class UserViewSet(viewsets.ModelViewSet):
         return response
     
     def perform_create(self, serializer):
-        # The list has changed, so the old cache is wrong. Delete it!
+        
         cache.delete('user_list')
-        print("Cache 'user_list' CLEARED! 🗑️") 
+        print("Cache 'user_list' CLEARED! ") 
         super().perform_create(serializer)
 
     def perform_update(self, serializer):
         super().perform_update(serializer)
         
-        fresh_data = self.get_serializer(self.get_queryset(), many=True).data
-        cache.set('user_list', fresh_data, timeout=settings.CACHE_TTL)
+        # 1. Update the main list (Write-Through)
+        fresh_list = self.get_serializer(self.get_queryset(), many=True).data
+        cache.set('user_list', fresh_list, timeout=settings.CACHE_TTL)
         
-        print("Cache 'user_list' UPDATED (Write-Through) 📝")
+        # 2. Update the individual user cache (Write-Through)
+        user_id = serializer.instance.id
+        fresh_user_data = serializer.data
+        cache.set(f"user_{user_id}", fresh_user_data, timeout=settings.CACHE_TTL)
+        
+        print(f"Cache for 'user_{user_id}' and 'user_list' UPDATED ")
 
     def perform_destroy(self, instance):
         # A user was deleted.
         cache.delete('user_list')
-        print("Cache 'user_list' CLEARED! 🗑️")
+        print("Cache 'user_list' CLEARED! ")
         super().perform_destroy(instance)
+    
+    def retrieve(self, request, *args, **kwargs):
+        user_id = kwargs.get('pk') 
+        
+        cache_key = f"user_{user_id}"
+        
+        cached_data = cache.get(cache_key)
+        if cached_data:
+            print(f"Fetching User {user_id} from Cache ⚡")
+            return Response(cached_data)
+            
+        print(f"Fetching User {user_id} from Database 🐢")
+        response = super().retrieve(request, *args, **kwargs)
+        
+        cache.set(cache_key, response.data, timeout=settings.CACHE_TTL)
+        return response
